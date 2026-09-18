@@ -22,7 +22,7 @@ spec:
       containers:
         - name: backend
 
-          image: 925047940866.dkr.ecr.ap-northeast-1.amazonaws.com/std01-ex9-backend:5ebae77b4bd0e3ad4ff159ad01fc3c3724431dab
+          image: 925047940866.dkr.ecr.ap-northeast-1.amazonaws.com/std01-ex9-backend:fbc9c2c50465b59fb552b62e30d64c2b5cb9cf96
 
           ports:
             - containerPort: 8000

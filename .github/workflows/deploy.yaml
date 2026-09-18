@@ -213,10 +213,26 @@ jobs:
 
 
       # ########################################################################
-      # 13. AWS Load Balancer Controller
+      # 13. 기존 ALB Controller / Webhook 인증서 정리
       #
-      # Kubernetes Ingress 감지
-      # → AWS ALB 자동 생성
+      # 기존 Webhook CA와 TLS 인증서 불일치 방지
+      # ########################################################################
+
+      - name: Clean Old AWS Load Balancer Controller
+        run: |
+          helm uninstall aws-load-balancer-controller \
+            -n kube-system || true
+
+          kubectl delete secret aws-load-balancer-tls \
+            -n kube-system \
+            --ignore-not-found
+
+
+      # ########################################################################
+      # 13-1. AWS Load Balancer Controller
+      #
+      # Kubernetes Ingress / LoadBalancer Service 감지
+      # → AWS ALB / NLB 자동 생성
       # ########################################################################
 
       - name: Install AWS Load Balancer Controller
@@ -232,6 +248,17 @@ jobs:
             --set serviceAccount.name=aws-load-balancer-controller \
             --set region=${{ secrets.AWS_REGION }} \
             --set vpcId=$VPC_ID
+
+
+      # ########################################################################
+      # 13-2. AWS Load Balancer Controller Ready 확인
+      # ########################################################################
+
+      - name: Wait for AWS Load Balancer Controller
+        run: |
+          kubectl rollout status deployment/aws-load-balancer-controller \
+            -n kube-system \
+            --timeout=300s
 
 
       # ########################################################################
@@ -413,6 +440,7 @@ jobs:
             -n argocd \
             -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
+
       # ########################################################################
       # ArgoCD Web UI External LoadBalancer
       #
@@ -467,3 +495,8 @@ jobs:
           kubectl get pods
           kubectl get svc
           kubectl get ingress
+
+          echo "===== ArgoCD Web UI ====="
+
+          kubectl get svc argocd-server \
+            -n argocd

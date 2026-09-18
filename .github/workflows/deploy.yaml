@@ -383,6 +383,9 @@ jobs:
       # Image
       # RDS Proxy Endpoint
       # Secrets Manager ARN
+      #
+      # DB_HOST / DB_SECRET_ARN은 Python으로 수정해서
+      # 기존 YAML 들여쓰기를 그대로 유지
       # ########################################################################
 
       - name: Update Kubernetes Manifests
@@ -395,13 +398,56 @@ jobs:
             "s|image: .*std01-ex9-backend:.*|image: $BACKEND_IMAGE|" \
             k8s/backend-deployment.yaml
 
-          sed -i \
-            "/- name: DB_HOST/{n;s|value: .*|              value: \"$DB_PROXY_ENDPOINT\"|;}" \
-            k8s/backend-deployment.yaml
+          python - <<'PY'
+          import os
+          from pathlib import Path
 
-          sed -i \
-            "/- name: DB_SECRET_ARN/{n;s|value: .*|              value: \"$DB_SECRET_ARN\"|;}" \
-            k8s/backend-deployment.yaml
+          path = Path("k8s/backend-deployment.yaml")
+          lines = path.read_text().splitlines()
+
+          db_host = os.environ["DB_PROXY_ENDPOINT"]
+          db_secret_arn = os.environ["DB_SECRET_ARN"]
+
+          for i, line in enumerate(lines):
+              if line.strip() == "- name: DB_HOST":
+                  indent = lines[i + 1][:len(lines[i + 1]) - len(lines[i + 1].lstrip())]
+                  lines[i + 1] = f'{indent}value: "{db_host}"'
+
+              if line.strip() == "- name: DB_SECRET_ARN":
+                  indent = lines[i + 1][:len(lines[i + 1]) - len(lines[i + 1].lstrip())]
+                  lines[i + 1] = f'{indent}value: "{db_secret_arn}"'
+
+          path.write_text("\n".join(lines) + "\n")
+          PY
+
+
+      # ########################################################################
+      # 19-1. Kubernetes Manifest 문법 검증
+      #
+      # GitHub에 커밋하기 전에 YAML이 정상인지 확인
+      # ########################################################################
+
+      - name: Validate Kubernetes Manifests
+        run: |
+          kubectl apply \
+            --dry-run=client \
+            -f k8s/backend-deployment.yaml
+
+          kubectl apply \
+            --dry-run=client \
+            -f k8s/frontend-deployment.yaml
+
+          kubectl apply \
+            --dry-run=client \
+            -f k8s/backend-service.yaml
+
+          kubectl apply \
+            --dry-run=client \
+            -f k8s/frontend-service.yaml
+
+          kubectl apply \
+            --dry-run=client \
+            -f k8s/ingress.yaml
 
 
       # ########################################################################

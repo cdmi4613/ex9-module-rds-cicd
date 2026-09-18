@@ -446,7 +446,7 @@ jobs:
       #
       # argocd-server Service
       # → AWS NLB 생성
-      # → 외부에서 지속적으로 ArgoCD Web UI 접속
+      # → internet-facing으로 외부 접속 허용
       # ########################################################################
 
       - name: Expose ArgoCD Web UI
@@ -455,6 +455,7 @@ jobs:
             -n argocd \
             service.beta.kubernetes.io/aws-load-balancer-type=external \
             service.beta.kubernetes.io/aws-load-balancer-nlb-target-type=ip \
+            service.beta.kubernetes.io/aws-load-balancer-scheme=internet-facing \
             --overwrite
 
           kubectl patch service argocd-server \

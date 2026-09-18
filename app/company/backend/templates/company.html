@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Company Backend</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f8fafc;
+            color: #1f2937;
+        }
+
+        header {
+            background: #0f172a;
+            color: white;
+            padding: 20px 40px;
+        }
+
+        .container {
+            min-height: calc(100vh - 70px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 700px;
+            background: white;
+            border-radius: 16px;
+            padding: 50px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        }
+
+        .badge {
+            display: inline-block;
+            background: #dcfce7;
+            color: #15803d;
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 34px;
+            margin-bottom: 15px;
+        }
+
+        .message {
+            font-size: 18px;
+            color: #475569;
+            margin-bottom: 30px;
+        }
+
+        .status {
+            background: #f1f5f9;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .status p {
+            margin: 8px 0;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #334155;
+        }
+
+        .button {
+            display: inline-block;
+            text-decoration: none;
+            background: #0f172a;
+            color: white;
+            padding: 13px 22px;
+            border-radius: 10px;
+            transition: 0.2s;
+        }
+
+        .button:hover {
+            background: #334155;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        FastAPI Backend
+    </header>
+
+    <div class="container">
+
+        <div class="card">
+
+            <div class="badge">
+                RDS Connected
+            </div>
+
+            <h1>
+                {{ company_name }}
+            </h1>
+
+            <p class="message">
+                {{ message }}
+            </p>
+
+            <div class="status">
+
+                <p>
+                    <span class="label">Framework:</span>
+                    FastAPI
+                </p>
+
+                <p>
+                    <span class="label">Database:</span>
+                    MySQL
+                </p>
+
+                <p>
+                    <span class="label">Connection:</span>
+                    RDS Proxy
+                </p>
+
+                <p>
+                    <span class="label">Database Name:</span>
+                    {{ db_name }}
+                </p>
+
+                <p>
+                    <span class="label">Environment:</span>
+                    AWS EKS
+                </p>
+
+            </div>
+
+            <a class="button" href="/">
+                Frontend로 돌아가기
+            </a>
+
+        </div>
+
+    </div>
+
+</body>
+
+</html>

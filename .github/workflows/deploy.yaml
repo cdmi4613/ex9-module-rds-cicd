@@ -1,0 +1,449 @@
+name: "EX9 Full Deploy Pipeline"
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    name: "Terraform → EKS Platform → App → ArgoCD"
+    runs-on: ubuntu-latest
+
+    steps:
+      # ########################################################################
+      # 1. Repository Checkout
+      # ########################################################################
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+
+      # ########################################################################
+      # 2. AWS Credentials
+      # ########################################################################
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+
+      # ########################################################################
+      # 3. Terraform Setup
+      # ########################################################################
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.x
+
+
+      # ########################################################################
+      # 4. Terraform Init
+      # S3 Backend의 기존 State 확인
+      # ########################################################################
+
+      - name: Terraform Init
+        working-directory: ./infra/resource
+        run: terraform init -reconfigure
+
+
+      # ########################################################################
+      # 5. Terraform Format / Validate
+      # ########################################################################
+
+      - name: Terraform Format
+        working-directory: ./infra/resource
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        working-directory: ./infra/resource
+        run: terraform validate
+
+
+      # ########################################################################
+      # 6. Terraform Plan / Apply
+      #
+      # VPC
+      # Subnet
+      # NAT
+      # ECR
+      # EKS
+      # RDS
+      # Secrets Manager
+      # RDS Proxy
+      # ########################################################################
+
+      - name: Terraform Plan
+        working-directory: ./infra/resource
+        run: terraform plan -no-color
+
+      - name: Terraform Apply
+        working-directory: ./infra/resource
+        run: terraform apply -auto-approve
+
+
+      # ########################################################################
+      # 7. AWS Resource Values
+      #
+      # RDS를 새로 만들면
+      # Proxy Endpoint / Secret ARN이 바뀔 수 있으므로
+      # Terraform Apply 이후 실제 AWS 값을 다시 조회
+      # ########################################################################
+
+      - name: Get AWS Resource Values
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity \
+            --query Account \
+            --output text)
+
+          DB_PROXY_ENDPOINT=$(aws rds describe-db-proxies \
+            --region ${{ secrets.AWS_REGION }} \
+            --db-proxy-name std01-ex9-rds-proxy \
+            --query "DBProxies[0].Endpoint" \
+            --output text)
+
+          DB_SECRET_ARN=$(aws rds describe-db-instances \
+            --region ${{ secrets.AWS_REGION }} \
+            --db-instance-identifier std01-ex9-mysql \
+            --query "DBInstances[0].MasterUserSecret.SecretArn" \
+            --output text)
+
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=std01-ex9-vpc" \
+            --query "Vpcs[0].VpcId" \
+            --output text)
+
+          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+          echo "DB_PROXY_ENDPOINT=$DB_PROXY_ENDPOINT" >> $GITHUB_ENV
+          echo "DB_SECRET_ARN=$DB_SECRET_ARN" >> $GITHUB_ENV
+          echo "VPC_ID=$VPC_ID" >> $GITHUB_ENV
+
+          echo "RDS Proxy: $DB_PROXY_ENDPOINT"
+          echo "VPC: $VPC_ID"
+
+
+      # ########################################################################
+      # 8. kubectl / Helm / eksctl Setup
+      # ########################################################################
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup eksctl
+        run: |
+          curl --silent --location \
+            "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" \
+            | tar xz -C /tmp
+
+          sudo mv /tmp/eksctl /usr/local/bin/eksctl
+
+
+      # ########################################################################
+      # 9. EKS Connection
+      # ########################################################################
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ secrets.AWS_REGION }} \
+            --name std01-ex9-cluster
+
+
+      # ########################################################################
+      # 10. EKS OIDC
+      #
+      # Kubernetes ServiceAccount와
+      # AWS IAM Role 연결을 위해 필요
+      # ########################################################################
+
+      - name: Configure EKS OIDC
+        run: |
+          eksctl utils associate-iam-oidc-provider \
+            --region ${{ secrets.AWS_REGION }} \
+            --cluster std01-ex9-cluster \
+            --approve
+
+
+      # ########################################################################
+      # 11. AWS Load Balancer Controller IAM Policy
+      # ########################################################################
+
+      - name: Create ALB Controller IAM Policy
+        run: |
+          POLICY_ARN="arn:aws:iam::$ACCOUNT_ID:policy/std01-ex9-AWSLoadBalancerControllerIAMPolicy"
+
+          if ! aws iam get-policy \
+            --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
+
+            curl -O \
+              https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.14.1/docs/install/iam_policy.json
+
+            aws iam create-policy \
+              --policy-name std01-ex9-AWSLoadBalancerControllerIAMPolicy \
+              --policy-document file://iam_policy.json
+          fi
+
+
+      # ########################################################################
+      # 12. ALB Controller ServiceAccount
+      # ########################################################################
+
+      - name: Create ALB Controller ServiceAccount
+        run: |
+          eksctl create iamserviceaccount \
+            --cluster std01-ex9-cluster \
+            --namespace kube-system \
+            --name aws-load-balancer-controller \
+            --attach-policy-arn arn:aws:iam::$ACCOUNT_ID:policy/std01-ex9-AWSLoadBalancerControllerIAMPolicy \
+            --approve \
+            --region ${{ secrets.AWS_REGION }} \
+            --override-existing-serviceaccounts
+
+
+      # ########################################################################
+      # 13. AWS Load Balancer Controller
+      #
+      # Kubernetes Ingress 감지
+      # → AWS ALB 자동 생성
+      # ########################################################################
+
+      - name: Install AWS Load Balancer Controller
+        run: |
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo update
+
+          helm upgrade --install aws-load-balancer-controller \
+            eks/aws-load-balancer-controller \
+            -n kube-system \
+            --set clusterName=std01-ex9-cluster \
+            --set serviceAccount.create=false \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --set region=${{ secrets.AWS_REGION }} \
+            --set vpcId=$VPC_ID
+
+
+      # ########################################################################
+      # 14. Backend Secrets Manager IAM Policy
+      #
+      # FastAPI Pod가 현재 RDS Secret만 읽을 수 있도록 설정
+      # Secret ARN이 변경되면 IAM Policy Version도 갱신
+      # ########################################################################
+
+      - name: Configure Backend Secrets IAM Policy
+        run: |
+          POLICY_ARN="arn:aws:iam::$ACCOUNT_ID:policy/std01-ex9-backend-secrets-policy"
+
+          cat > backend-secrets-policy.json <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "secretsmanager:GetSecretValue"
+                ],
+                "Resource": "$DB_SECRET_ARN"
+              }
+            ]
+          }
+          EOF
+
+          if aws iam get-policy \
+            --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
+
+            NON_DEFAULT_VERSIONS=$(aws iam list-policy-versions \
+              --policy-arn "$POLICY_ARN" \
+              --query "Versions[?IsDefaultVersion==\`false\`].VersionId" \
+              --output text)
+
+            for VERSION in $NON_DEFAULT_VERSIONS; do
+              aws iam delete-policy-version \
+                --policy-arn "$POLICY_ARN" \
+                --version-id "$VERSION"
+            done
+
+            aws iam create-policy-version \
+              --policy-arn "$POLICY_ARN" \
+              --policy-document file://backend-secrets-policy.json \
+              --set-as-default
+
+          else
+
+            aws iam create-policy \
+              --policy-name std01-ex9-backend-secrets-policy \
+              --policy-document file://backend-secrets-policy.json
+          fi
+
+
+      # ########################################################################
+      # 15. FastAPI Backend ServiceAccount
+      #
+      # FastAPI Pod
+      # → company-backend ServiceAccount
+      # → IAM Role
+      # → Secrets Manager
+      # ########################################################################
+
+      - name: Create Backend ServiceAccount
+        run: |
+          eksctl create iamserviceaccount \
+            --cluster std01-ex9-cluster \
+            --namespace default \
+            --name company-backend \
+            --attach-policy-arn arn:aws:iam::$ACCOUNT_ID:policy/std01-ex9-backend-secrets-policy \
+            --approve \
+            --region ${{ secrets.AWS_REGION }} \
+            --override-existing-serviceaccounts
+
+
+      # ########################################################################
+      # 16. ECR Login
+      # ########################################################################
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+
+      # ########################################################################
+      # 17. Frontend Docker Build / Push
+      # ########################################################################
+
+      - name: Build and Push Frontend
+        run: |
+          FRONTEND_IMAGE="$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/std01-ex9-frontend:${{ github.sha }}"
+
+          docker build \
+            -t "$FRONTEND_IMAGE" \
+            ./app/company/frontend
+
+          docker push "$FRONTEND_IMAGE"
+
+          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
+
+
+      # ########################################################################
+      # 18. Backend Docker Build / Push
+      # ########################################################################
+
+      - name: Build and Push Backend
+        run: |
+          BACKEND_IMAGE="$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/std01-ex9-backend:${{ github.sha }}"
+
+          docker build \
+            -t "$BACKEND_IMAGE" \
+            ./app/company/backend
+
+          docker push "$BACKEND_IMAGE"
+
+          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
+
+
+      # ########################################################################
+      # 19. Kubernetes Manifest 자동 갱신
+      #
+      # Image
+      # RDS Proxy Endpoint
+      # Secrets Manager ARN
+      # ########################################################################
+
+      - name: Update Kubernetes Manifests
+        run: |
+          sed -i \
+            "s|image: .*std01-ex9-frontend:.*|image: $FRONTEND_IMAGE|" \
+            k8s/frontend-deployment.yaml
+
+          sed -i \
+            "s|image: .*std01-ex9-backend:.*|image: $BACKEND_IMAGE|" \
+            k8s/backend-deployment.yaml
+
+          sed -i \
+            "/- name: DB_HOST/{n;s|value: .*|              value: \"$DB_PROXY_ENDPOINT\"|;}" \
+            k8s/backend-deployment.yaml
+
+          sed -i \
+            "/- name: DB_SECRET_ARN/{n;s|value: .*|              value: \"$DB_SECRET_ARN\"|;}" \
+            k8s/backend-deployment.yaml
+
+
+      # ########################################################################
+      # 20. GitOps Manifest Commit
+      #
+      # ArgoCD가 이 변경을 감지해서 EKS에 배포
+      # ########################################################################
+
+      - name: Commit Kubernetes Manifest Update
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add k8s/frontend-deployment.yaml
+          git add k8s/backend-deployment.yaml
+
+          git commit \
+            -m "deploy ex9 application ${{ github.sha }}" || true
+
+          git push
+
+
+      # ########################################################################
+      # 21. ArgoCD Install
+      # ########################################################################
+
+      - name: Install ArgoCD
+        run: |
+          kubectl create namespace argocd \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          kubectl apply \
+            --server-side \
+            --force-conflicts \
+            -n argocd \
+            -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+
+      # ########################################################################
+      # 22. Wait for ArgoCD
+      # ########################################################################
+
+      - name: Wait for ArgoCD
+        run: |
+          kubectl rollout status deployment/argocd-server \
+            -n argocd \
+            --timeout=300s
+
+
+      # ########################################################################
+      # 23. ArgoCD Application
+      #
+      # GitHub k8s/
+      # → ArgoCD
+      # → EKS
+      # ########################################################################
+
+      - name: Apply ArgoCD Application
+        run: |
+          kubectl apply -f k8s/argocd-application.yaml
+
+
+      # ########################################################################
+      # 24. Deployment 확인
+      # ########################################################################
+
+      - name: Check Kubernetes Resources
+        run: |
+          kubectl get pods
+          kubectl get svc
+          kubectl get ingress

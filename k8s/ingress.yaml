@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: company-ingress
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+
+    # 80, 443 리스너 생성
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+
+    # HTTP 접속 시 HTTPS로 리다이렉트
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+
+    # 기존 ACM 인증서 사용
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-northeast-1:925047940866:certificate/02a00df3-af02-463d-88b5-ebc60bd3003f
+
+spec:
+  ingressClassName: alb
+
+  rules:
+    - host: www.cloumin.cloud
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: company-backend-service
+                port:
+                  number: 8000
+
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: company-frontend-service
+                port:
+                  number: 80

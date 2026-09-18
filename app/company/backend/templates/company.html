@@ -82,16 +82,39 @@
 
         .button {
             display: inline-block;
+            border: 0;
+            cursor: pointer;
             text-decoration: none;
             background: #0f172a;
             color: white;
             padding: 13px 22px;
             border-radius: 10px;
-            transition: 0.2s;
+            margin-right: 10px;
+            font-size: 14px;
         }
 
         .button:hover {
             background: #334155;
+        }
+
+        .result {
+            display: none;
+            margin-top: 25px;
+            padding: 18px;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+
+        .success {
+            display: block;
+            background: #dcfce7;
+            color: #15803d;
+        }
+
+        .error {
+            display: block;
+            background: #fee2e2;
+            color: #b91c1c;
         }
     </style>
 </head>
@@ -107,7 +130,7 @@
         <div class="card">
 
             <div class="badge">
-                RDS Connected
+                Backend Running
             </div>
 
             <h1>
@@ -147,13 +170,54 @@
 
             </div>
 
+            <button class="button" onclick="testRdsConnection()">
+                RDS 연결 확인
+            </button>
+
             <a class="button" href="/">
                 Frontend로 돌아가기
             </a>
 
+            <div id="rds-result" class="result"></div>
+
         </div>
 
     </div>
+
+    <script>
+        async function testRdsConnection() {
+            const resultBox = document.getElementById("rds-result");
+
+            resultBox.className = "result";
+            resultBox.style.display = "block";
+            resultBox.textContent = "RDS 연결 확인 중...";
+
+            try {
+                const response = await fetch("/api/rds-test");
+
+                if (!response.ok) {
+                    throw new Error("RDS 연결 실패");
+                }
+
+                const data = await response.json();
+
+                if (data.status === "success") {
+                    resultBox.className = "result success";
+                    resultBox.textContent =
+                        "SUCCESS - RDS에서 실제 success 값을 조회했습니다.";
+                } else {
+                    resultBox.className = "result error";
+                    resultBox.textContent =
+                        "ERROR - 예상하지 못한 DB 응답입니다.";
+                }
+
+            } catch (error) {
+                resultBox.className = "result error";
+                resultBox.textContent =
+                    "ERROR - RDS 연결에 실패했습니다.";
+            }
+        }
+    </script>
 
 </body>
 

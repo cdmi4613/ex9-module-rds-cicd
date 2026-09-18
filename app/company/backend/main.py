@@ -26,7 +26,6 @@ DB_PORT = int(os.getenv("DB_PORT", "3306"))
 
 # ##############################################################################
 # Secrets Manager
-# DB username / password 조회
 # ##############################################################################
 
 def get_db_secret():
@@ -55,7 +54,6 @@ def get_db_connection():
 
     secret = get_db_secret()
 
-    # RDS Proxy에서 TLS를 요구하도록 설정했기 때문에 SSL 연결 사용
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
@@ -74,7 +72,6 @@ def get_db_connection():
 
 # ##############################################################################
 # Database Initialization
-# 실습용 company_info 테이블 생성 및 기본 데이터 입력
 # ##############################################################################
 
 def initialize_database():
@@ -82,6 +79,8 @@ def initialize_database():
 
     try:
         with connection.cursor() as cursor:
+
+            # 회사 정보 테이블
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS company_info (
@@ -115,6 +114,28 @@ def initialize_database():
                         "FastAPI + RDS Proxy + MySQL 정상 연결"
                     )
                 )
+
+            # RDS 연결 확인용 테이블
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS connection_status (
+                    id INT PRIMARY KEY,
+                    status VARCHAR(50) NOT NULL
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO connection_status (
+                    id,
+                    status
+                )
+                VALUES (1, 'success')
+                ON DUPLICATE KEY UPDATE
+                    status = 'success'
+                """
+            )
 
         connection.commit()
 
@@ -156,10 +177,43 @@ def company(request: Request):
         context={
             "company_name": company_data["company_name"],
             "message": company_data["message"],
-            "db_host": DB_HOST,
             "db_name": DB_NAME
         }
     )
+
+
+# ##############################################################################
+# RDS Connection Test
+#
+# 실제 RDS MySQL 테이블에서 status 값을 조회
+# ##############################################################################
+
+@app.get("/api/rds-test")
+def rds_test():
+    initialize_database()
+
+    connection = get_db_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT status
+                FROM connection_status
+                WHERE id = 1
+                """
+            )
+
+            result = cursor.fetchone()
+
+    finally:
+        connection.close()
+
+    return {
+        "database": "RDS MySQL",
+        "connection": "RDS Proxy",
+        "status": result["status"]
+    }
 
 
 # ##############################################################################

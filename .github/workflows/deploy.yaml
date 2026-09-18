@@ -413,6 +413,26 @@ jobs:
             -n argocd \
             -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
+      # ########################################################################
+      # ArgoCD Web UI External LoadBalancer
+      #
+      # argocd-server Service
+      # → AWS NLB 생성
+      # → 외부에서 지속적으로 ArgoCD Web UI 접속
+      # ########################################################################
+
+      - name: Expose ArgoCD Web UI
+        run: |
+          kubectl annotate service argocd-server \
+            -n argocd \
+            service.beta.kubernetes.io/aws-load-balancer-type=external \
+            service.beta.kubernetes.io/aws-load-balancer-nlb-target-type=ip \
+            --overwrite
+
+          kubectl patch service argocd-server \
+            -n argocd \
+            -p '{"spec":{"type":"LoadBalancer"}}'
+
 
       # ########################################################################
       # 22. Wait for ArgoCD

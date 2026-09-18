@@ -21,7 +21,7 @@ spec:
       containers:
         - name: backend
 
-          image: 925047940866.dkr.ecr.ap-northeast-1.amazonaws.com/std01-ex9-backend:latest
+          image: 925047940866.dkr.ecr.ap-northeast-1.amazonaws.com/std01-ex9-backend:2b557192ea121af2e64f89d41195fe154b15d371
 
           ports:
             - containerPort: 8000
@@ -31,7 +31,7 @@ spec:
               value: "ap-northeast-1"
 
             - name: DB_HOST
-              value: "std01-ex9-rds-proxy.proxy-c7k4iwowmk84.ap-northeast-1.rds.amazonaws.com"
+                            value: "std01-ex9-rds-proxy.proxy-c7k4iwowmk84.ap-northeast-1.rds.amazonaws.com"
 
             - name: DB_NAME
               value: "company"
@@ -40,4 +40,4 @@ spec:
               value: "3306"
 
             - name: DB_SECRET_ARN
-              value: "arn:aws:secretsmanager:ap-northeast-1:925047940866:secret:rds!db-dc1948ab-1bf3-4b4f-90d1-1dd800775dea-J4nV94"
+                            value: "arn:aws:secretsmanager:ap-northeast-1:925047940866:secret:rds!db-dc1948ab-1bf3-4b4f-90d1-1dd800775dea-J4nV94"
